@@ -15,7 +15,7 @@ PYTHONPATH="${env:PYTHONPATH}:/Applications/Qgis.app/Contents/Resources/python/p
 4. Create a softlink from the dev plugin folder to the QGIS plugins directory, this is system specific, e.g.:
 
 ```bash
-ln -s /Users/gareth/dev/benchmark-urbanism/cityseer-qgis/cityseer /Users/gareth/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins
+ln -s /Users/gareth/dev/benchmark-urbanism/cityseer-qgis/cityseer-qgis /Users/gareth/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins
 ```
 
 ## QGIS plugin config

@@ -1,7 +1,10 @@
 """ """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+os.environ["CITYSEER_QUIET_MODE"] = "1"
 
 from cityseer.tools import io
 from qgis.core import (
@@ -197,6 +200,8 @@ class OsmTab(QtWidgets.QWidget):
     def process_import(self) -> None:
         """ """
         QgsMessageLog.logMessage("Fetching OSM data for specified extents.", level=Qgis.Warning, notifyUser=True)
-        print(self.parent_crs_selection.authid())
-        osm_nx = io.osm_graph_from_poly(self.extents_poly, self.parent_crs_selection.authid())
+        epsg_code = int(self.parent_crs_selection.authid().split(":")[-1])
+        osm_nx = io.osm_graph_from_poly(
+            self.extents_poly, poly_epsg_code=epsg_code, to_epsg_code=epsg_code, simplify=True
+        )
         print(osm_nx)
