@@ -11,13 +11,19 @@ from qgis.core import (
     Qgis,
     QgsCoordinateReferenceSystem,
     QgsFeature,
+    QgsField,
+    QgsFields,
+    QgsLineString,
     QgsMapLayerProxyModel,
     QgsMessageLog,
+    QgsProject,
+    QgsVectorFileWriter,
     QgsVectorLayer,
     QgsWkbTypes,
 )
 from qgis.gui import QgsMapLayerComboBox
 from qgis.PyQt import QtWidgets
+from qgis.PyQt.QtCore import QVariant
 from shapely import geometry, wkt
 
 
@@ -60,8 +66,8 @@ class ByRadiusTab(QtWidgets.QWidget):
     def handle_extents(self) -> None:
         """ """
         try:
-            self.easting = int(self.easting_input.text())
-            self.northing = int(self.northing_input.text())
+            self.easting = round(float(self.easting_input.text()))
+            self.northing = round(float(self.northing_input.text()))
             self.radius = int(self.radius_input.text())
             self.poly = geometry.Point(self.easting, self.northing).buffer(self.radius)
         except Exception:
@@ -105,6 +111,8 @@ class ByPolyTab(QtWidgets.QWidget):
         self.poly = None
         # check geometry
         candidate_layer: QgsVectorLayer = self.poly_input_extents.currentLayer()
+        if candidate_layer is None:
+            return
         geom_type: QgsWkbTypes.GeometryType = candidate_layer.geometryType()  # type: ignore
         if not isinstance(candidate_layer, QgsVectorLayer) or geom_type != QgsWkbTypes.PolygonGeometry:
             self.poly_input_feedback.setText("Polygon Layer required.")
@@ -129,7 +137,7 @@ class OsmTab(QtWidgets.QWidget):
     radius_tab: ByRadiusTab
     poly_tab: ByPolyTab
     buffer_dist_input: QtWidgets.QLineEdit
-    filename_input: QtWidgets.QLineEdit
+    filename_output: QtWidgets.QLineEdit
     import_btn: QtWidgets.QPushButton
     extents_poly: geometry.Polygon | geometry.MultiPolygon | None
 
@@ -155,9 +163,9 @@ class OsmTab(QtWidgets.QWidget):
         self.buffer_dist_input.textChanged.connect(self.handle_params)
         layout.addWidget(self.buffer_dist_input)
         layout.addWidget(QtWidgets.QLabel("Output filename"))
-        self.filename_input = QtWidgets.QLineEdit("")
-        self.filename_input.textChanged.connect(self.handle_params)
-        layout.addWidget(self.filename_input)
+        self.filename_output = QtWidgets.QLineEdit("")
+        self.filename_output.textChanged.connect(self.handle_params)
+        layout.addWidget(self.filename_output)
         # action button
         self.import_btn = QtWidgets.QPushButton("Import")
         self.import_btn.setDisabled(True)
@@ -177,7 +185,7 @@ class OsmTab(QtWidgets.QWidget):
         # check if buffer distance and file name have been provided
         try:
             self.buffer_dist = int(self.buffer_dist_input.text())
-            self.filename = self.filename_input.text()
+            self.filename = self.filename_output.text()
         except Exception:
             return
         if self.filename == "":
@@ -185,9 +193,9 @@ class OsmTab(QtWidgets.QWidget):
         # check that extents are available via tabs
         current_tab = self.tabs.currentWidget()
         if isinstance(current_tab, ByRadiusTab):
-            self.extents_poly = self.radius_tab.poly
+            self.extents_poly = self.radius_tab.poly.buffer(self.buffer_dist)
         else:
-            self.extents_poly = self.poly_tab.poly
+            self.extents_poly = self.poly_tab.poly.buffer(self.buffer_dist)
         if self.extents_poly is None:
             return
         # check that working directory and CRS are available via parent
@@ -204,4 +212,50 @@ class OsmTab(QtWidgets.QWidget):
         osm_nx = io.osm_graph_from_poly(
             self.extents_poly, poly_epsg_code=epsg_code, to_epsg_code=epsg_code, simplify=True
         )
-        print(osm_nx)
+        # fields
+        fields = QgsFields()
+        fields.append(QgsField("fid", QVariant.Int))
+        fields.append(QgsField("start_nd", QVariant.String))
+        fields.append(QgsField("end_nd", QVariant.String))
+        fields.append(QgsField("edge_key", QVariant.Int))
+        # vector writer
+        save_options = QgsVectorFileWriter.SaveVectorOptions()
+        save_options.driverName = "GPKG"
+        save_options.fileEncoding = "UTF-8"
+        save_options.layerName = "osm_network"
+        out_path = f"{self.parent_working_dir_path}/{self.filename}.gpkg"
+        writer = QgsVectorFileWriter.create(
+            out_path,
+            fields,
+            QgsWkbTypes.LineString,
+            self.parent_crs_selection,
+            QgsProject.instance().transformContext(),
+            save_options,
+        )
+        if writer.hasError() != QgsVectorFileWriter.NoError:
+            QgsMessageLog.logMessage(
+                f"Unable to create output file: {out_path}: {writer.errorMessage()}",
+                level=Qgis.Warning,
+                notifyUser=True,
+            )
+        # write features
+        counter = 0
+        for start_idx, end_idx, edge_key, data in osm_nx.edges(keys=True, data=True):
+            line_geom = QgsLineString()
+            line_geom.fromWkt(data["geom"].wkt)
+            feat = QgsFeature()
+            feat.setGeometry(line_geom)
+            feat.setAttributes([counter, str(start_idx), str(end_idx), int(edge_key)])
+            writer.addFeature(feat)
+            counter += 1
+        del writer  # important!
+        # add to map
+        netw_layer = QgsVectorLayer(out_path, "osm_network", "ogr")
+        if not netw_layer.isValid():
+            QgsMessageLog.logMessage(
+                f"File is not valid: {out_path}",
+                level=Qgis.Warning,
+                notifyUser=True,
+            )
+        else:
+            QgsProject.instance().addMapLayer(netw_layer)
