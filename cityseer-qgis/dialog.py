@@ -94,7 +94,7 @@ class CityseerDialog(QtWidgets.QDockWidget):
             self.working_dir_path = None
         else:
             self.working_dir_feedback.setText("")
-            self.working_dir_path = out_path.parent.absolute()
+            self.working_dir_path = out_path.absolute()
         self.update_child_tabs()
 
     def handle_crs(self) -> None:
